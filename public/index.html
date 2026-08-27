@@ -100,7 +100,8 @@
   .nav-links{display:flex;gap:28px;}
   .nav-links a{font-size:14px;color:var(--text-dim);font-weight:500;}
   .nav-links a:hover{color:var(--text);}
-  .nav-right{display:flex;align-items:center;gap:10px;}
+  .nav-right{display:flex;align-items:center;gap:10px;flex-shrink:0;}
+  .btn-short{display:none;}
 
   /* buttons */
   .btn{
@@ -340,14 +341,52 @@
     .stat:nth-child(2){border-right:none;}
     .split{grid-template-columns:1fr;}
     .visual-grid{grid-template-columns:1fr;}
-    /* activation panel stacks naturally */
     .footer-top{grid-template-columns:1fr 1fr;}
+    .section{padding:72px 0;}
+  }
+  @media (max-width:600px){
+    .wrap{width:min(1120px,94%);}
+    nav.wrap{
+      height:auto;min-height:56px;padding:10px 0;gap:10px;
+    }
+    .logo{gap:8px;min-width:0;flex-shrink:1;}
+    .logo-mark{width:24px;height:24px;}
+    .logo-word{font-size:17px;}
+    .nav-right{gap:6px;}
+    .nav-right .btn-ghost{display:none;}
+    .nav-right .btn{padding:8px 12px;font-size:12px;}
+    .btn-full{display:none;}
+    .btn-short{display:inline;}
+    .hero{padding:64px 0 36px;}
+    .hero-brand{font-size:clamp(48px,18vw,72px);}
+    .hero-cta{flex-direction:column;width:100%;}
+    .hero-cta .btn{width:100%;max-width:320px;}
+    .hero-panel{margin-top:32px;}
+    .hero-panel-inner{padding:14px;}
+    .section{padding:56px 0;}
+    .section-head{margin-bottom:36px;}
+    .section-sub{font-size:15px;}
+    .cta-inner{padding:32px 18px;}
+    .activation-row{
+      flex-direction:column;align-items:flex-start;gap:10px;
+      padding:16px 18px;
+    }
+    .footer-bottom{flex-direction:column;align-items:flex-start;}
+    .toast{
+      left:16px;right:16px;bottom:20px;transform:translateY(20px);
+      max-width:none;text-align:center;
+    }
+    .toast.show{transform:translateY(0);}
   }
   @media (max-width:560px){
     .feature-grid{grid-template-columns:1fr;}
     .stats-grid{grid-template-columns:1fr 1fr;}
+    .stat{padding:20px 12px;}
+    .stat-val{font-size:22px;}
     .footer-top{grid-template-columns:1fr;}
-    .hero{padding:80px 0 40px;min-height:auto;}
+    .pill-row{gap:8px;}
+    .pill{font-size:12px;padding:7px 12px;}
+    .visual-copy{padding:20px;}
   }
   @media (prefers-reduced-motion:reduce){
     .hero-load,.reveal{opacity:1;transform:none;transition:none;}
@@ -372,7 +411,7 @@
     </div>
     <div class="nav-right">
       <a href="#security" class="btn btn-ghost">Is it safe?</a>
-      <a href="#install" class="btn btn-glow btn-primary">Get FomoSnipe</a>
+      <a href="#install" class="btn btn-glow btn-primary"><span class="btn-full">Get FomoSnipe</span><span class="btn-short">Get</span></a>
     </div>
   </nav>
 </header>
