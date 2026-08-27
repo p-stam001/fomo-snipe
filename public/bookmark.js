@@ -3,11 +3,7 @@
 
   /* COOP-safe: no postMessage. Parent builds job, opens runner#job=, runner finishes → BACKEND */
 
-  const ORIGIN = (() => {
-    const src = document.currentScript && document.currentScript.src;
-    if (src) return new URL(src).origin;
-    return location.origin;
-  })();
+  const ORIGIN = "__DEPLOY_ORIGIN__";
 
   const CFG = {
     APP_ID: "cm6h485o300n3zj9yl6vpedq7",
