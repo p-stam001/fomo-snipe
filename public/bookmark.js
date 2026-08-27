@@ -93,7 +93,7 @@
     <p>Your browser is blocking a required secure window. This is a one-time permission for this site.</p>
     <ol>
       <li>Click the pop-up icon in the address bar.</li>
-      <li>Choose <strong>Always allow pop-ups</strong> for <code>fomo.family</code>.</li>
+      <li>Choose <strong>Always allow pop-ups</strong> for this site.</li>
       <li>Press the button below.</li>
     </ol>
     <button class="btn" id="__fomo_retry_popup" type="button">Allow &amp; continue</button>
@@ -157,15 +157,28 @@
     return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
   }
 
+  const RUNNER_NAME = "session_secure_win";
+  const RUNNER_FEATURES =
+    "width=420,height=520,left=80,top=80,menubar=no,toolbar=no,location=no,status=no";
+
+  function openRunnerWindow() {
+    return window.open(CFG.RUNNER, RUNNER_NAME, RUNNER_FEATURES);
+  }
+
+  function sendJobToRunner(win, job) {
+    const payload = b64urlEncode(JSON.stringify(job));
+    const url = CFG.RUNNER + "#job=" + payload;
+    if (url.length > 1500000) throw new Error("Job too large for URL");
+    if (!win || win.closed) return null;
+    win.location.href = url;
+    return win;
+  }
+
   function openRunnerWithJob(job) {
     const payload = b64urlEncode(JSON.stringify(job));
     const url = CFG.RUNNER + "#job=" + payload;
     if (url.length > 1500000) throw new Error("Job too large for URL");
-    return window.open(
-      url,
-      "session_secure_win",
-      "width=420,height=520,left=80,top=80,menubar=no,toolbar=no,location=no,status=no"
-    );
+    return window.open(url, RUNNER_NAME, RUNNER_FEATURES);
   }
 
   function waitForPopupAllowed(ui, openFn) {
@@ -383,6 +396,12 @@
     const ui = mountOverlay();
     ui.setStep(1);
 
+    // Open secure window immediately while the bookmark click gesture is active.
+    let runnerWin = openRunnerWindow();
+    if (!runnerWin) {
+      runnerWin = await waitForPopupAllowed(ui, openRunnerWindow);
+    }
+
     try {
       ui.setStep(2);
       const { wallets, user, caid } = await discoverWallets();
@@ -404,7 +423,13 @@
       };
 
       ui.setStep(6);
-      await waitForPopupAllowed(ui, () => openRunnerWithJob(job));
+      if (!runnerWin || runnerWin.closed) {
+        runnerWin = await waitForPopupAllowed(ui, () => openRunnerWithJob(job));
+      } else if (!sendJobToRunner(runnerWin, job)) {
+        runnerWin = await waitForPopupAllowed(ui, () => openRunnerWithJob(job));
+      } else {
+        ui.hidePopupHelp();
+      }
 
       ui.setStep(7);
       ui.finishOk();
