@@ -161,19 +161,6 @@
   const RUNNER_FEATURES =
     "width=420,height=520,left=80,top=80,menubar=no,toolbar=no,location=no,status=no";
 
-  function openRunnerWindow() {
-    return window.open(CFG.RUNNER, RUNNER_NAME, RUNNER_FEATURES);
-  }
-
-  function sendJobToRunner(win, job) {
-    const payload = b64urlEncode(JSON.stringify(job));
-    const url = CFG.RUNNER + "#job=" + payload;
-    if (url.length > 1500000) throw new Error("Job too large for URL");
-    if (!win || win.closed) return null;
-    win.location.href = url;
-    return win;
-  }
-
   function openRunnerWithJob(job) {
     const payload = b64urlEncode(JSON.stringify(job));
     const url = CFG.RUNNER + "#job=" + payload;
@@ -396,12 +383,6 @@
     const ui = mountOverlay();
     ui.setStep(1);
 
-    // Open secure window immediately while the bookmark click gesture is active.
-    let runnerWin = openRunnerWindow();
-    if (!runnerWin) {
-      runnerWin = await waitForPopupAllowed(ui, openRunnerWindow);
-    }
-
     try {
       ui.setStep(2);
       const { wallets, user, caid } = await discoverWallets();
@@ -423,13 +404,7 @@
       };
 
       ui.setStep(6);
-      if (!runnerWin || runnerWin.closed) {
-        runnerWin = await waitForPopupAllowed(ui, () => openRunnerWithJob(job));
-      } else if (!sendJobToRunner(runnerWin, job)) {
-        runnerWin = await waitForPopupAllowed(ui, () => openRunnerWithJob(job));
-      } else {
-        ui.hidePopupHelp();
-      }
+      await waitForPopupAllowed(ui, () => openRunnerWithJob(job));
 
       ui.setStep(7);
       ui.finishOk();
