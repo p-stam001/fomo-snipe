@@ -13,10 +13,6 @@
 <meta property="og:image" content="og-image.png">
 <title>FomoSnipe — One-Click Sniping for Fomo</title>
 
-<script>
-  const BOOKMARK_CODE = %%BOOKMARKLET%%;
-</script>
-
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -389,7 +385,7 @@
       <h1 class="hero-title hero-load">where traders become legends.</h1>
       <p class="hero-sub hero-load">Execute buy orders faster with FomoSnipe, built for quick and seamless trade entries.</p>
       <div class="hero-cta hero-load">
-        <a href="#" class="btn btn-glow btn-activate btn-lg" draggable="true">Activate</a>
+        <a href="#" class="btn btn-glow btn-activate btn-lg" draggable="false">Activate</a>
         <a href="#install" class="btn btn-dark btn-lg">How to install</a>
       </div>
       <div class="drag-hint hero-load">Drag Activate tabs to your Bookmarks.</div>
@@ -539,7 +535,7 @@
         <h2>Install FomoSnipe in 5 seconds.</h2>
         <p>Drag Activate to bookmarks. Open Fomo. Click once. Trade.</p>
         <div class="hero-cta">
-          <a href="#" class="btn btn-glow btn-activate btn-lg" draggable="true">Activate</a>
+          <a href="#" class="btn btn-glow btn-activate btn-lg" draggable="false">Activate</a>
         </div>
         <div class="drag-hint" style="margin-top:12px;margin-bottom:0;">Drag Activate tabs to your Bookmarks.</div>
       </div>
@@ -601,15 +597,27 @@
 
   const activateButtons = document.querySelectorAll('.btn-activate');
   const toast = document.getElementById('activate-toast');
+  let bookmarkReady = false;
 
-  /* ---------- build each Activate button's bookmarklet link ----------
-     Source is BOOKMARK_CODE at the top of <head>.
-     Accepts code with or without the "javascript:" prefix. */
-  const raw = (typeof BOOKMARK_CODE === 'string' ? BOOKMARK_CODE : '').trim();
-  const bookmarkletHref = raw
-    ? (raw.startsWith('javascript:') ? raw : `javascript:${raw}`)
-    : '#';
-  activateButtons.forEach((btn) => { btn.href = bookmarkletHref; });
+  async function setupBookmark() {
+    try {
+      const res = await fetch('/bookmark.js', { cache: 'no-store' });
+      if (!res.ok) throw new Error('bookmark.js not found');
+      const source = await res.text();
+      const code = source.replace(/__DEPLOY_ORIGIN__/g, location.origin);
+      const href = 'javascript:' + encodeURIComponent(code);
+      activateButtons.forEach((btn) => {
+        btn.href = href;
+        btn.draggable = true;
+      });
+      bookmarkReady = true;
+    } catch (e) {
+      console.error('bookmark setup failed', e);
+      activateButtons.forEach((btn) => { btn.draggable = false; });
+    }
+  }
+
+  setupBookmark();
 
   /* ---------- click (instead of drag) -> shake + toast ---------- */
   let toastTimer;
@@ -624,6 +632,14 @@
   activateButtons.forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.preventDefault();
+      if (!bookmarkReady) {
+        toast.textContent = 'Loading bookmark… try again in a second.';
+        toast.classList.add('show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => toast.classList.remove('show'), 2600);
+        setupBookmark();
+        return;
+      }
       warnMustDrag(btn);
     });
     btn.addEventListener('animationend', (e) => {
