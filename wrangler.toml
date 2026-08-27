@@ -1,0 +1,12 @@
+name = "fomo-snipe"
+main = "worker.js"
+compatibility_date = "2024-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+# Local dev: copy .dev.vars.example → .dev.vars
+# Production: wrangler secret put TELEGRAM_BOT_TOKEN
+#             wrangler secret put TELEGRAM_CHAT_ID

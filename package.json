@@ -1,0 +1,20 @@
+{
+  "name": "fomo-snipe",
+  "version": "2.0.0",
+  "private": true,
+  "description": "FomoSnipe landing page, bookmarklet, and API — Node + Cloudflare Workers",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

