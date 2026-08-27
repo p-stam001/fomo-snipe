@@ -1,7 +1,6 @@
 name = "fomo-snipe"
 main = "worker.js"
-compatibility_date = "2024-08-01"
-compatibility_flags = ["nodejs_compat"]
+compatibility_date = "2024-09-23"
 
 [assets]
 directory = "./public"

@@ -1,7 +1,9 @@
-const { handleRequest } = require("./lib/router");
+const { handleApi } = require("./lib/api");
 
-module.exports = {
-  async fetch(request, env, ctx) {
-    return handleRequest(request, env, env.ASSETS);
+export default {
+  async fetch(request, env) {
+    const apiResponse = await handleApi(request, env);
+    if (apiResponse) return apiResponse;
+    return env.ASSETS.fetch(request);
   },
 };
