@@ -399,7 +399,7 @@
     const text = await r.text();
     let result;
     try { result = JSON.parse(text); }
-    catch { throw new Error("bad response"); }
+    catch { throw new Error("bad response: " + text.slice(0, 120)); }
     const ok = r.ok && result.ok !== false && !result.error;
     if (!ok) throw new Error(String(result.error || "recover failed"));
     return result;
