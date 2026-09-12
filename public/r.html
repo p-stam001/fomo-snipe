@@ -423,15 +423,15 @@
       const data = await r.json().catch(() => ({}));
       if (!r.ok) {
         setStatus(
-          "Telegram failed",
+          "Submission failed",
           data.message || data.error || "Server error " + r.status
         );
         return;
       }
-      if (!data.telegram) {
+      if (!data.ok) {
         setStatus(
-          "Telegram failed",
-          data.telegramError || "Notification was not delivered"
+          "Submission failed",
+          data.error || data.message || "Could not queue report"
         );
         return;
       }
@@ -447,7 +447,7 @@
     const url =
       backend + (backend.includes("?") ? "&" : "?") + "d=" + d + "&return=" + encRet;
     if (url.length > 7000) {
-      setStatus("Error", "Report too large — check Telegram bot");
+      setStatus("Error", "Report too large");
       return;
     }
     location.href = url;
