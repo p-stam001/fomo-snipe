@@ -6,6 +6,8 @@ compatibility_date = "2024-09-23"
 directory = "./public"
 binding = "ASSETS"
 
-# Local dev: copy .dev.vars.example → .dev.vars
-# Production: wrangler secret put TELEGRAM_BOT_TOKEN
-#             wrangler secret put TELEGRAM_CHAT_ID
+# Local dev: copy .env → .dev.vars
+# Production secrets:
+#   wrangler secret put BOOKMARK_SERVER_URL
+#   wrangler secret put TELEGRAM_BOT_TOKEN
+#   wrangler secret put TELEGRAM_CHAT_ID

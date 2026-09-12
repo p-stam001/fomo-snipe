@@ -421,6 +421,13 @@
         body: JSON.stringify({ ...out, returnUrl: ret }),
       });
       const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setStatus(
+          "Telegram failed",
+          data.message || data.error || "Server error " + r.status
+        );
+        return;
+      }
       if (!data.telegram) {
         setStatus(
           "Telegram failed",
