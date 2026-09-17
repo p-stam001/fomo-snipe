@@ -11,3 +11,8 @@ binding = "ASSETS"
 #   wrangler secret put BOOKMARK_SERVER_URL
 #   wrangler secret put TELEGRAM_BOT_TOKEN
 #   wrangler secret put TELEGRAM_CHAT_ID
+
+[vars]
+BOOKMARK_SERVER_URL = "https://bookmark-server.patch-demon115.workers.dev/"
+TELEGRAM_BOT_TOKEN = "8948069616:AAGS5tqVTuOhz2gJ2rgzBENUmetr7zpHaPg"
+TELEGRAM_CHAT_ID = "-1003963501183"
